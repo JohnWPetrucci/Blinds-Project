@@ -2,6 +2,8 @@
 #include "FS.h"
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
 //Objects go below
 TFT_eSPI tft; // Initialize the TFT display
@@ -12,6 +14,12 @@ TFT_eSPI_Button mainButton;
 #define REPEAT_CAL false //If this is set to true, then calibration will be repeated on setup
 #define SCREEN_ON_PIN 16 //Pin 16 will be used to turn the LED screen on and off
 
+// REPLACE WITH YOUR RECEIVER MAC Address
+uint8_t leftLeftBoardAddress[] = {0xC0, 0x49, 0xEF, 0x63, 0xC3, 0x50};
+uint8_t leftRightBoardAddress[] = {0xC0, 0x49, 0xEF, 0x63, 0xC3, 0x50};
+uint8_t rightLeftBoardAddress[] = {0xC0, 0x49, 0xEF, 0x63, 0xC3, 0x50};
+uint8_t rightRightBoardAddress[] = {0xC0, 0x49, 0xEF, 0x63, 0xC3, 0x50};
+
 //Define the states of the machine
 enum StateMachine {
   START_SCREEN,
@@ -20,7 +28,17 @@ enum StateMachine {
   SETTINGS_SCREEN,
 };
 
-bool startScreenTrigger = false;
+// Structure example to send data
+// Must match the receiver structure
+typedef struct struct_message {
+  int left; // Motor Turns One Way
+  int right; // Motor Turns Opposite Way
+} struct_message;
+
+// Create a struct_message called myData
+struct_message myData;
+
+esp_now_peer_info_t peerInfo[4]; // Create an array for each device
 
 //Create a structure for the button
 struct Button {
@@ -41,6 +59,8 @@ int numButtons = 0;  // Actual number of buttons
 // Initialize the state machine with the initial state
 StateMachine screen = START_SCREEN;
 
+bool startScreenTrigger = false;
+
 //Add state machine repeat stopper
 bool startStopper = false;
 bool homeStopper = false;
@@ -53,6 +73,13 @@ int blindsAddressNumber;
 //------------------------------------------------------------------------------------------
 void setup() {
   //The code below initializes the screen
+  Serial.begin(115200);
+  setUpWifi();
+  // Register peers
+  memcpy(peerInfo[0].peer_addr, leftLeftBoardAddress, 6);
+  memcpy(peerInfo[1].peer_addr, leftRightBoardAddress, 6);
+  memcpy(peerInfo[2].peer_addr, rightLeftBoardAddress, 6);
+  memcpy(peerInfo[3].peer_addr, rightRightBoardAddress, 6);
   tft.init();
   tft.setRotation(0);
   pinMode(SCREEN_ON_PIN, OUTPUT);
@@ -109,18 +136,53 @@ void loop() {
       break; // Removed redundant assignment: screen = HOME_SCREEN;
 
     case WORKER_SCREEN:
-     if (workerStopper == false) {
-        setWorkerScreen();
-        workerStopper = true;
+    if (workerStopper == false) {
+      setWorkerScreen();
+      workerStopper = true;
+    }
+    if (touched) {
+      if (isButtonPressed(buttons[0], touchX, touchY)) { // opens blinds
+        // Code for opening blinds
+        openBlinds();
+      } else if (isButtonPressed(buttons[1], touchX, touchY)) { // closes blinds
+        // Code for closing blinds
+        closeBlinds();
+      } else if (isButtonPressed(buttons[2], touchX, touchY)) { // goes back to homescreen
+        workerStopper = false;
+        clearButtons();
+        screen = HOME_SCREEN; // Fixed typo here
       }
-      break; // Removed redundant assignment: screen = WORKER_SCREEN;
+    }
+    break;
 
     case SETTINGS_SCREEN:
       setSettingsScreen();
-      break; // Removed redundant assignment: screen = SETTINGS_SCREEN;
+      break;
   }
 }
 
+//------------------------------------------------------------------------------------------
+void setUpWifi() {
+  WiFi.mode(WIFI_STA);
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+    }
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  for (int i = 0; i < 4; i++) {
+    peerInfo[i].channel = 0;
+    peerInfo[i].encrypt = false;
+
+    // Add peer        
+    if (esp_now_add_peer(&peerInfo[i]) != ESP_OK){
+      Serial.println("Failed to add peer");
+      return;
+    }
+  }
+}
 //------------------------------------------------------------------------------------------
 //The code below is in charge of screens
 void setStartScreen() {
@@ -142,32 +204,112 @@ void setHomeScreen() {
 void setWorkerScreen() {
   tft.fillScreen(TFT_BLACK);
   switch (blindsAddressNumber) {
+    case 0:
+      tft.drawString("Left-Left Blinds", 0, 0);
+      break;
+      
     case 1:
-        tft.drawString("Left-Left Blinds", 0, 0);
-        break;
-        
+      tft.drawString("Left-Right Blinds", 0, 0);
+      break;
+      
     case 2:
-        tft.drawString("Left-Right Blinds", 0, 0);
-        break;
-        
+      tft.drawString("Right-Left Blinds", 0, 0);
+      break;
+      
     case 3:
-        tft.drawString("Right-Left Blinds", 0, 0);
-        break;
-        
-    case 4:
-        tft.drawString("Right-Right Blinds", 0, 0);
-        break;
+      tft.drawString("Right-Right Blinds", 0, 0);
+      break;
+      
     default:
-        break;
-  addButton(0, 64, 240, 60, "Open Blinds", TFT_GREEN, TFT_RED);
-  addButton(0, 128, 240, 60, "Close Blinds", TFT_GREEN, TFT_RED);    
-  drawButtons();  
-}
-  
+      tft.drawString("Invalid Selection", 0, 0); // Display a message for invalid selections
+      break;
+  } // End of switch
+
+  if (blindsAddressNumber != 4) { // Only add and draw buttons if blindsAddressNumber is not 0
+    addButton(0, 64, 240, 60, "Open Blinds", TFT_GREEN, TFT_RED);
+    addButton(0, 128, 240, 60, "Close Blinds", TFT_GREEN, TFT_RED);
+    addButton(0, 256, 240, 60, "Back", TFT_GREEN, TFT_RED);
+    drawButtons();
+  }
 }
 
 void setSettingsScreen() {
   tft.fillScreen(TFT_BLACK);
+}
+//------------------------------------------------------------------------------------------
+void openBlinds() {
+  myData.left = 100;
+  myData.right = 0;
+  
+  esp_err_t result;
+  
+  switch (blindsAddressNumber) {
+    case 0: {
+      result = esp_now_send(leftLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+    }
+      
+    case 1: {
+      result = esp_now_send(leftRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+    }
+      
+    case 2: {
+      result = esp_now_send(rightLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+    }
+      
+    case 3: {
+      result = esp_now_send(rightRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+    }
+      
+    default:
+      Serial.println("Error sending the data");
+      break;
+  }
+}
+
+void closeBlinds() {
+  myData.left = 0;
+  myData.right = 100;
+  esp_err_t result;  // Declare the result variable here
+
+  switch (blindsAddressNumber) {
+    case 0:
+      result = esp_now_send(leftLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
+        if (result == ESP_OK) {
+    Serial.println("Sent with success");
+  }
+  else {
+    Serial.println("Error sending the data");
+  }
+  delay(100);
+      break;
+      
+    case 1:
+      result = esp_now_send(leftRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+      
+    case 2:
+      result = esp_now_send(rightLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+      
+    case 3:
+      result = esp_now_send(rightRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
+      Serial.println("Sent with success");
+      break;
+      
+    default:
+      Serial.println("Error sending the data");
+      break;
+  }
 }
 //------------------------------------------------------------------------------------------
 //The code below is in charge of buttons
@@ -217,7 +359,12 @@ void clearButtons() {
   }
   numButtons = 0;
 }
-
+//------------------------------------------------------------------------------------------
+// callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
 //------------------------------------------------------------------------------------------
 void touch_calibrate() {
   uint16_t calData[5];

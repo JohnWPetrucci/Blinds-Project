@@ -38,7 +38,10 @@ typedef struct struct_message {
 // Create a struct_message called myData
 struct_message myData;
 
-esp_now_peer_info_t peerInfo[4]; // Create an array for each device
+esp_now_peer_info_t peerInfo0; // Create an array for each device
+esp_now_peer_info_t peerInfo1;
+esp_now_peer_info_t peerInfo2;
+esp_now_peer_info_t peerInfo3;
 
 //Create a structure for the button
 struct Button {
@@ -76,10 +79,10 @@ void setup() {
   Serial.begin(115200);
   setUpWifi();
   // Register peers
-  memcpy(peerInfo[0].peer_addr, leftLeftBoardAddress, 6);
-  memcpy(peerInfo[1].peer_addr, leftRightBoardAddress, 6);
-  memcpy(peerInfo[2].peer_addr, rightLeftBoardAddress, 6);
-  memcpy(peerInfo[3].peer_addr, rightRightBoardAddress, 6);
+  memcpy(peerInfo0.peer_addr, leftLeftBoardAddress, 6);
+  memcpy(peerInfo1.peer_addr, leftRightBoardAddress, 6);
+  memcpy(peerInfo2.peer_addr, rightLeftBoardAddress, 6);
+  memcpy(peerInfo3.peer_addr, rightRightBoardAddress, 6);
   tft.init();
   tft.setRotation(0);
   pinMode(SCREEN_ON_PIN, OUTPUT);
@@ -172,17 +175,36 @@ void setUpWifi() {
   // Once ESPNow is successfully Init, we will register for Send CB to
   // get the status of Trasnmitted packet
   esp_now_register_send_cb(OnDataSent);
-  for (int i = 0; i < 4; i++) {
-    peerInfo[i].channel = 0;
-    peerInfo[i].encrypt = false;
+
+    peerInfo0.channel = 0;
+    peerInfo0.encrypt = false;
+    peerInfo1.channel = 0;
+    peerInfo1.encrypt = false;
+    peerInfo2.channel = 0;
+    peerInfo2.encrypt = false;
+    peerInfo3.channel = 0;
+    peerInfo3.encrypt = false;
 
     // Add peer        
-    if (esp_now_add_peer(&peerInfo[i]) != ESP_OK){
-      Serial.println("Failed to add peer");
+    if (esp_now_add_peer(&peerInfo0) != ESP_OK){
+      Serial.println("Failed to add peer 0");
       return;
     }
-  }
+     if (esp_now_add_peer(&peerInfo1) != ESP_OK){
+      Serial.println("Failed to add peer 1");
+      return;
+    }
+     if (esp_now_add_peer(&peerInfo2) != ESP_OK){
+      Serial.println("Failed to add peer 2");
+      return;
+    }
+     if (esp_now_add_peer(&peerInfo3) != ESP_OK){
+      Serial.println("Failed to add peer 3");
+      return;
+    }
 }
+//------------------------------------------------------------------------------------------
+
 //------------------------------------------------------------------------------------------
 //The code below is in charge of screens
 void setStartScreen() {
@@ -246,25 +268,25 @@ void openBlinds() {
   switch (blindsAddressNumber) {
     case 0: {
       result = esp_now_send(leftLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
     }
       
     case 1: {
       result = esp_now_send(leftRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
     }
       
     case 2: {
       result = esp_now_send(rightLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
     }
       
     case 3: {
       result = esp_now_send(rightRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
     }
       
@@ -282,28 +304,23 @@ void closeBlinds() {
   switch (blindsAddressNumber) {
     case 0:
       result = esp_now_send(leftLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
-        if (result == ESP_OK) {
-    Serial.println("Sent with success");
-  }
-  else {
-    Serial.println("Error sending the data");
-  }
+      isESPOK(result);
   delay(100);
       break;
       
     case 1:
       result = esp_now_send(leftRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
       
     case 2:
       result = esp_now_send(rightLeftBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
       
     case 3:
       result = esp_now_send(rightRightBoardAddress, (uint8_t *) &myData, sizeof(myData));
-      Serial.println("Sent with success");
+      isESPOK(result);
       break;
       
     default:
@@ -311,6 +328,14 @@ void closeBlinds() {
       break;
   }
 }
+//------------------------------------------------------------------------------------------
+ void isESPOK(esp_err_t result){
+ if (result == ESP_OK) {
+          Serial.println("Sent with success");
+        } else {
+          Serial.println("Error sending the data");
+        }
+ }
 //------------------------------------------------------------------------------------------
 //The code below is in charge of buttons
 //addButton allows you to dynamically add buttons
